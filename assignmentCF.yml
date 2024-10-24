@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for IAM, S3 access, Secrets Manager, Parameter Store, EventBridge, and Lambda.
+
+Parameters:
+  User1Email:
+    Type: String
+    Description: Email of the first user
+  User2Email:
+    Type: String
+    Description: Email of the second user
+
+Resources:
+  S3ReadAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: S3ReadAccessPolicy
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Action: 
+              - s3:GetObject
+              - s3:ListBucket
+            Resource: '*'
+
+  S3Group:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: S3ReadOnlyGroup
+      Policies:
+        - PolicyName: S3ReadOnlyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: '*'
+
+  EC2Group:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: EC2S3ReadOnlyGroup
+      Policies:
+        - PolicyName: EC2S3ReadOnlyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: '*'
+
+  SecretForIAMUsers:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: IAMUserPassword
+      Description: Temporary password for IAM users.
+      GenerateSecretString:
+        SecretStringTemplate: '{"password":"tempPassword"}'
+        GenerateStringKey: "password"
+
+  IAMUser1:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: User1
+      Groups:
+        - !Ref S3Group
+      LoginProfile:
+        Password: !Sub "{{resolve:secretsmanager:${SecretForIAMUsers}::password}}"
+        PasswordResetRequired: true
+
+  IAMUser2:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: User2
+      Groups:
+        - !Ref EC2Group
+      LoginProfile:
+        Password: !Sub "{{resolve:secretsmanager:${SecretForIAMUsers}::password}}"
+        PasswordResetRequired: true
+
+  ParameterStoreUser1Email:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /IAM/User1/Email
+      Type: String
+      Value: !Ref User1Email
+
+  ParameterStoreUser2Email:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /IAM/User2/Email
+      Type: String
+      Value: !Ref User2Email
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: IAMUserCreationRule
+      EventPattern:
+        source:
+          - "aws.iam"
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventName:
+            - "CreateUser"
+      Targets:
+        - Arn: !GetAtt SendUserEmailLambda.Arn
+          Id: SendUserEmailLambdaTarget
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - secretsmanager:GetSecretValue
+                Resource: '*'
+
+  SendUserEmailLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SendUserEmailLambda
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const ssm = new AWS.SSM();
+          const secretsManager = new AWS.SecretsManager();
+          
+          exports.handler = async (event) => {
+              const userName = event.detail.requestParameters.userName;
+
+              const emailParamName = `/IAM/${userName}/Email`;
+              const emailParam = await ssm.getParameter({ Name: emailParamName }).promise();
+              const email = emailParam.Parameter.Value;
+              
+              const secretValue = await secretsManager.getSecretValue({ SecretId: 'IAMUserPassword' }).promise();
+              const tempPassword = JSON.parse(secretValue.SecretString).password;
+              
+              console.log(`User: ${userName}, Email: ${email}, Temporary Password: ${tempPassword}`);
+          };
+      Runtime: nodejs14.x
+      Timeout: 30
+
+Outputs:
+  User1Login:
+    Description: Console login for User1
+    Value: !Join 
+      - ""
+      - - "https://"
+        - !Ref "AWS::Region"
+        - ".signin.aws.amazon.com/console"
+
+  User2Login:
+    Description: Console login for User2
+    Value: !Join 
+      - ""
+      - - "https://"
+        - !Ref "AWS::Region"
+        - ".signin.aws.amazon.com/console"
