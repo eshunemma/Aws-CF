@@ -2,10 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: CloudFormation template for IAM, S3 access, Secrets Manager, Parameter Store, EventBridge, and Lambda.
 
 Parameters:
-  User1Email:
+  User3Email:
     Type: String
     Description: Email of the first user
-  User2Email:
+  User4Email:
     Type: String
     Description: Email of the second user
 
@@ -62,39 +62,39 @@ Resources:
         SecretStringTemplate: '{"password":"tempPassword"}'
         GenerateStringKey: "password"
 
-  IAMUser1:
+  IAMUser3:
     Type: AWS::IAM::User
     Properties:
-      UserName: User1
+      UserName: User3
       Groups:
         - !Ref S3Group
       LoginProfile:
         Password: !Sub "{{resolve:secretsmanager:${SecretForIAMUsers}::password}}"
         PasswordResetRequired: true
 
-  IAMUser2:
+  IAMUser4:
     Type: AWS::IAM::User
     Properties:
-      UserName: User2
+      UserName: User4
       Groups:
         - !Ref EC2Group
       LoginProfile:
         Password: !Sub "{{resolve:secretsmanager:${SecretForIAMUsers}::password}}"
         PasswordResetRequired: true
 
-  ParameterStoreUser1Email:
+  ParameterStoreUser3Email:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /IAM/User1/Email
+      Name: /IAM/User3/Email
       Type: String
-      Value: !Ref User1Email
+      Value: !Ref User3Email
 
-  ParameterStoreUser2Email:
+  ParameterStoreUser4Email:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: /IAM/User2/Email
+      Name: /IAM/User4/Email
       Type: String
-      Value: !Ref User2Email
+      Value: !Ref User4Email
 
   EventBridgeRule:
     Type: AWS::Events::Rule
@@ -158,20 +158,20 @@ Resources:
               
               console.log(`User: ${userName}, Email: ${email}, Temporary Password: ${tempPassword}`);
           };
-      Runtime: nodejs14.x
+      Runtime: nodejs18.x
       Timeout: 30
 
 Outputs:
-  User1Login:
-    Description: Console login for User1
+  User3Login:
+    Description: Console login for User3
     Value: !Join 
       - ""
       - - "https://"
         - !Ref "AWS::Region"
         - ".signin.aws.amazon.com/console"
 
-  User2Login:
-    Description: Console login for User2
+  User4Login:
+    Description: Console login for User4
     Value: !Join 
       - ""
       - - "https://"
